@@ -1,65 +1,239 @@
-import Image from "next/image";
+"use client";
+
+import { useState, useEffect, useCallback } from "react";
+import { Lightbulb, AlertCircle } from "lucide-react";
+import SearchInput from "./components/SearchInput";
+import HintStepper from "./components/HintStepper";
+import HistorySidebar from "./components/HistorySidebar";
+
+interface Hint {
+  step: number;
+  title: string;
+  content: string;
+}
+
+interface Problem {
+  title: string;
+  difficulty: string;
+  tags: string[];
+}
+
+interface HistoryItem {
+  id: string;
+  title: string;
+  difficulty: string;
+  timestamp: number;
+  currentStep: number;
+  hints: Hint[];
+  problem: Problem;
+}
+
+const STORAGE_KEY = "dsa-hinter-history";
 
 export default function Home() {
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [problem, setProblem] = useState<Problem | null>(null);
+  const [hints, setHints] = useState<Hint[]>([]);
+  const [currentStep, setCurrentStep] = useState(0);
+  const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [currentProblemId, setCurrentProblemId] = useState<string | null>(null);
+
+  // Load history from localStorage
+  useEffect(() => {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      try {
+        setHistory(JSON.parse(saved));
+      } catch {
+        console.error("Failed to parse history");
+      }
+    }
+  }, []);
+
+  // Save history to localStorage
+  const saveHistory = useCallback((items: HistoryItem[]) => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+    setHistory(items);
+  }, []);
+
+  // Update current problem in history when step changes
+  useEffect(() => {
+    if (currentProblemId && hints.length > 0) {
+      const updatedHistory = history.map((item) =>
+        item.id === currentProblemId ? { ...item, currentStep } : item
+      );
+      saveHistory(updatedHistory);
+    }
+  }, [currentStep, currentProblemId, hints.length, history, saveHistory]);
+
+  const handleSearch = async (query: string) => {
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetch("/api/hints", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to fetch hints");
+      }
+
+      setProblem(data.problem);
+      setHints(data.hints);
+      setCurrentStep(0);
+
+      // Create new history entry
+      const problemId = `${data.problem.title}-${Date.now()}`;
+      setCurrentProblemId(problemId);
+
+      const newHistoryItem: HistoryItem = {
+        id: problemId,
+        title: data.problem.title,
+        difficulty: data.problem.difficulty,
+        timestamp: Date.now(),
+        currentStep: 0,
+        hints: data.hints,
+        problem: data.problem,
+      };
+
+      // Add to history (keep last 20)
+      const newHistory = [newHistoryItem, ...history].slice(0, 20);
+      saveHistory(newHistory);
+
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleReveal = () => {
+    if (currentStep < hints.length) {
+      setCurrentStep(currentStep + 1);
+    }
+  };
+
+  const handleHistorySelect = (id: string) => {
+    const item = history.find((h) => h.id === id);
+    if (item) {
+      setProblem(item.problem);
+      setHints(item.hints);
+      setCurrentStep(item.currentStep);
+      setCurrentProblemId(id);
+      setIsHistoryOpen(false);
+      setError(null);
+    }
+  };
+
+  const handleHistoryDelete = (id: string) => {
+    const newHistory = history.filter((h) => h.id !== id);
+    saveHistory(newHistory);
+
+    if (currentProblemId === id) {
+      setProblem(null);
+      setHints([]);
+      setCurrentStep(0);
+      setCurrentProblemId(null);
+    }
+  };
+
+  const handleHistoryClear = () => {
+    saveHistory([]);
+    setProblem(null);
+    setHints([]);
+    setCurrentStep(0);
+    setCurrentProblemId(null);
+  };
+
+  const getDifficultyClass = (difficulty: string) => {
+    switch (difficulty?.toLowerCase()) {
+      case "easy":
+        return "difficulty-easy";
+      case "medium":
+        return "difficulty-medium";
+      case "hard":
+        return "difficulty-hard";
+      default:
+        return "";
+    }
+  };
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
+    <main className="main-container">
+      <header className="header">
+        <div className="logo">
+          <Lightbulb className="logo-icon" size={32} />
+          <h1>DSA Hinter</h1>
+        </div>
+        <p className="tagline">Get progressive hints for LeetCode problems without spoilers</p>
+
+        <HistorySidebar
+          history={history}
+          isOpen={isHistoryOpen}
+          onToggle={() => setIsHistoryOpen(!isHistoryOpen)}
+          onSelect={handleHistorySelect}
+          onDelete={handleHistoryDelete}
+          onClear={handleHistoryClear}
         />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+      </header>
+
+      <section className="search-section">
+        <SearchInput onSearch={handleSearch} isLoading={isLoading} />
+      </section>
+
+      {error && (
+        <div className="error-message">
+          <AlertCircle size={20} />
+          <span>{error}</span>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+      )}
+
+      {problem && hints.length > 0 && (
+        <section className="problem-section">
+          <div className="problem-header">
+            <h2 className="problem-title">{problem.title}</h2>
+            <span className={`difficulty-badge large ${getDifficultyClass(problem.difficulty)}`}>
+              {problem.difficulty}
+            </span>
+          </div>
+
+          {problem.tags.length > 0 && (
+            <div className="problem-tags">
+              {problem.tags.map((tag) => (
+                <span key={tag} className="tag">{tag}</span>
+              ))}
+            </div>
+          )}
+
+          <HintStepper
+            hints={hints}
+            currentStep={currentStep}
+            onReveal={handleReveal}
+          />
+        </section>
+      )}
+
+      {!problem && !isLoading && !error && (
+        <section className="welcome-section">
+          <div className="welcome-content">
+            <div className="welcome-icon">💡</div>
+            <h2>How it works</h2>
+            <ol className="steps-list">
+              <li>Enter a LeetCode problem number or name</li>
+              <li>Get 5 progressive hints that guide your thinking</li>
+              <li>Reveal hints one at a time as you need them</li>
+              <li>Solve the problem yourself with the insights gained!</li>
+            </ol>
+          </div>
+        </section>
+      )}
+    </main>
   );
 }
