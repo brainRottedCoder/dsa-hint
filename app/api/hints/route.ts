@@ -5,43 +5,19 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
 
 // LeetCode API to fetch problem details
 async function fetchLeetCodeProblem(query: string) {
-    // Try to fetch by slug first
-    const slug = query.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
+    const trimmedQuery = query.trim();
+    const isNumber = /^\d+$/.test(trimmedQuery);
 
-    try {
-        // Using alfa-leetcode-api
-        const response = await fetch(`https://alfa-leetcode-api.onrender.com/select?titleSlug=${slug}`);
-        if (response.ok) {
-            const data = await response.json();
-            if (data.questionTitle) {
-                return {
-                    title: data.questionTitle,
-                    difficulty: data.difficulty,
-                    description: data.question, // HTML content
-                    topicTags: data.topicTags || [],
-                };
-            }
-        }
-    } catch (error) {
-        console.error("Error fetching from alfa-leetcode-api:", error);
-    }
+    // Convert query to slug format
+    const slug = trimmedQuery.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
 
-    // Fallback: try searching by problem number or name
-    try {
-        const searchResponse = await fetch(`https://alfa-leetcode-api.onrender.com/problems?limit=50`);
-        if (searchResponse.ok) {
-            const problems = await searchResponse.json();
-            const found = problems.problemsetQuestionList?.find((p: { frontendQuestionId: string; titleSlug: string; title: string }) =>
-                p.frontendQuestionId === query ||
-                p.titleSlug.includes(slug) ||
-                p.title.toLowerCase().includes(query.toLowerCase())
-            );
-
-            if (found) {
-                // Fetch full details
-                const detailResponse = await fetch(`https://alfa-leetcode-api.onrender.com/select?titleSlug=${found.titleSlug}`);
-                if (detailResponse.ok) {
-                    const data = await detailResponse.json();
+    // Try direct slug fetch first (works for problem names like "two-sum")
+    if (!isNumber) {
+        try {
+            const response = await fetch(`https://alfa-leetcode-api.onrender.com/select?titleSlug=${slug}`);
+            if (response.ok) {
+                const data = await response.json();
+                if (data.questionTitle) {
                     return {
                         title: data.questionTitle,
                         difficulty: data.difficulty,
@@ -50,9 +26,150 @@ async function fetchLeetCodeProblem(query: string) {
                     };
                 }
             }
+        } catch (error) {
+            console.error("Error fetching by slug:", error);
+        }
+    }
+
+    // For numbers or if slug didn't work, use GraphQL to get problem list
+    try {
+        // Use the LeetCode GraphQL endpoint via a proxy
+        const graphqlQuery = {
+            query: `
+                query problemsetQuestionList($categorySlug: String, $limit: Int, $skip: Int, $filters: QuestionListFilterInput) {
+                    problemsetQuestionList: questionList(
+                        categorySlug: $categorySlug
+                        limit: $limit
+                        skip: $skip
+                        filters: $filters
+                    ) {
+                        questions: data {
+                            frontendQuestionId: questionFrontendId
+                            title
+                            titleSlug
+                            difficulty
+                            topicTags {
+                                name
+                            }
+                        }
+                    }
+                }
+            `,
+            variables: {
+                categorySlug: "",
+                skip: 0,
+                limit: 3000,
+                filters: {}
+            }
+        };
+
+        const listResponse = await fetch('https://leetcode.com/graphql', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(graphqlQuery)
+        });
+
+        if (listResponse.ok) {
+            const listData = await listResponse.json();
+            const questions = listData.data?.problemsetQuestionList?.questions || [];
+
+            // Find matching problem
+            const found = questions.find((p: { frontendQuestionId: string; titleSlug: string; title: string }) => {
+                if (isNumber) {
+                    return p.frontendQuestionId === trimmedQuery;
+                }
+                return p.titleSlug === slug ||
+                    p.titleSlug.includes(slug) ||
+                    p.title.toLowerCase().includes(trimmedQuery.toLowerCase());
+            });
+
+            if (found) {
+                // Fetch full problem details
+                const detailQuery = {
+                    query: `
+                        query questionContent($titleSlug: String!) {
+                            question(titleSlug: $titleSlug) {
+                                content
+                                questionFrontendId
+                                title
+                                difficulty
+                                topicTags {
+                                    name
+                                }
+                            }
+                        }
+                    `,
+                    variables: { titleSlug: found.titleSlug }
+                };
+
+                const detailResponse = await fetch('https://leetcode.com/graphql', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(detailQuery)
+                });
+
+                if (detailResponse.ok) {
+                    const detailData = await detailResponse.json();
+                    const question = detailData.data?.question;
+
+                    if (question) {
+                        return {
+                            title: question.title,
+                            difficulty: question.difficulty,
+                            description: question.content || `Problem: ${question.title}`,
+                            topicTags: question.topicTags || [],
+                        };
+                    }
+                }
+
+                // If detail fetch fails, use the basic info we have
+                return {
+                    title: found.title,
+                    difficulty: found.difficulty,
+                    description: `Problem ${found.frontendQuestionId}: ${found.title}`,
+                    topicTags: found.topicTags || [],
+                };
+            }
         }
     } catch (error) {
-        console.error("Error searching problems:", error);
+        console.error("Error fetching from LeetCode GraphQL:", error);
+    }
+
+    // Final fallback: try alfa-leetcode-api problems list
+    try {
+        const fallbackResponse = await fetch(`https://alfa-leetcode-api.onrender.com/problems?limit=100`);
+        if (fallbackResponse.ok) {
+            const fallbackData = await fallbackResponse.json();
+            const problems = fallbackData.problemsetQuestionList || [];
+
+            const found = problems.find((p: { frontendQuestionId: string; titleSlug: string; title: string }) => {
+                if (isNumber) {
+                    return p.frontendQuestionId === trimmedQuery;
+                }
+                return p.titleSlug?.includes(slug) || p.title?.toLowerCase().includes(trimmedQuery.toLowerCase());
+            });
+
+            if (found) {
+                const detailResponse = await fetch(`https://alfa-leetcode-api.onrender.com/select?titleSlug=${found.titleSlug}`);
+                if (detailResponse.ok) {
+                    const data = await detailResponse.json();
+                    if (data.questionTitle) {
+                        return {
+                            title: data.questionTitle,
+                            difficulty: data.difficulty,
+                            description: data.question,
+                            topicTags: data.topicTags || [],
+                        };
+                    }
+                }
+            }
+        }
+    } catch (error) {
+        console.error("Error in fallback fetch:", error);
     }
 
     return null;

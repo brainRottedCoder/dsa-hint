@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Lightbulb, AlertCircle } from "lucide-react";
 import SearchInput from "./components/SearchInput";
 import HintStepper from "./components/HintStepper";
@@ -40,6 +40,10 @@ export default function Home() {
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [currentProblemId, setCurrentProblemId] = useState<string | null>(null);
 
+  // Use ref to track history without causing re-renders in useEffect
+  const historyRef = useRef<HistoryItem[]>([]);
+  historyRef.current = history;
+
   // Load history from localStorage
   useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY);
@@ -60,13 +64,14 @@ export default function Home() {
 
   // Update current problem in history when step changes
   useEffect(() => {
-    if (currentProblemId && hints.length > 0) {
-      const updatedHistory = history.map((item) =>
+    if (currentProblemId && hints.length > 0 && currentStep > 0) {
+      const updatedHistory = historyRef.current.map((item) =>
         item.id === currentProblemId ? { ...item, currentStep } : item
       );
-      saveHistory(updatedHistory);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedHistory));
+      setHistory(updatedHistory);
     }
-  }, [currentStep, currentProblemId, hints.length, history, saveHistory]);
+  }, [currentStep, currentProblemId, hints.length]);
 
   const handleSearch = async (query: string) => {
     setIsLoading(true);
