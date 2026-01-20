@@ -8,7 +8,7 @@ interface ProblemData {
     difficulty: string;
     description: string;
     topicTags: { name: string }[];
-    platform: "leetcode" | "codeforces";
+    platform: "leetcode" | "codeforces" | "gfg";
 }
 
 // Codeforces API to fetch problem details
@@ -82,6 +82,95 @@ async function fetchCodeforcesProblem(query: string): Promise<ProblemData | null
         }
     } catch (error) {
         console.error("Error fetching Codeforces problem:", error);
+    }
+
+    return null;
+}
+
+// GeeksforGeeks API to fetch problem details
+async function fetchGFGProblem(query: string): Promise<ProblemData | null> {
+    const trimmedQuery = query.trim();
+
+    // Convert query to slug format (GFG uses lowercase with hyphens)
+    const slug = trimmedQuery.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
+
+    try {
+        // Try fetching problem details from GFG Practice API
+        const response = await fetch(`https://practiceapi.geeksforgeeks.org/api/v1/problems/${slug}/`);
+
+        if (response.ok) {
+            const data = await response.json();
+
+            if (data && data.problem_name) {
+                const difficulty = data.difficulty || 'Medium';
+                const difficultyMap: Record<string, string> = {
+                    'school': 'Easy',
+                    'basic': 'Easy',
+                    'easy': 'Easy',
+                    'medium': 'Medium',
+                    'hard': 'Hard'
+                };
+
+                return {
+                    title: data.problem_name,
+                    difficulty: difficultyMap[difficulty.toLowerCase()] || difficulty,
+                    description: data.problem_statement || `GeeksforGeeks Problem: ${data.problem_name}`,
+                    topicTags: data.tags?.map((t: string) => ({ name: t })) || [],
+                    platform: "gfg",
+                };
+            }
+        }
+    } catch (error) {
+        console.error("Error fetching from GFG API:", error);
+    }
+
+    // Fallback: Search in GFG problems list
+    try {
+        const searchResponse = await fetch(`https://practiceapi.geeksforgeeks.org/api/v1/problems/?search=${encodeURIComponent(trimmedQuery)}&pageSize=20`);
+
+        if (searchResponse.ok) {
+            const searchData = await searchResponse.json();
+            const problems = searchData.results || [];
+
+            const found = problems.find((p: { slug: string; problem_name: string }) =>
+                p.slug === slug ||
+                p.slug?.includes(slug) ||
+                p.problem_name?.toLowerCase().includes(trimmedQuery.toLowerCase())
+            );
+
+            if (found) {
+                const difficulty = found.difficulty || 'Medium';
+                const difficultyMap: Record<string, string> = {
+                    'school': 'Easy',
+                    'basic': 'Easy',
+                    'easy': 'Easy',
+                    'medium': 'Medium',
+                    'hard': 'Hard'
+                };
+
+                return {
+                    title: found.problem_name,
+                    difficulty: difficultyMap[difficulty.toLowerCase()] || difficulty,
+                    description: found.problem_statement || `GeeksforGeeks Problem: ${found.problem_name}. Tags: ${found.tags?.join(', ') || 'DSA'}`,
+                    topicTags: found.tags?.map((t: string) => ({ name: t })) || [{ name: 'DSA' }],
+                    platform: "gfg",
+                };
+            }
+        }
+    } catch (error) {
+        console.error("Error searching GFG problems:", error);
+    }
+
+    // Final fallback: Use the query as problem info for Gemini
+    // GFG problems might not always be in the API, so we create a basic entry
+    if (trimmedQuery.length > 3) {
+        return {
+            title: trimmedQuery,
+            difficulty: 'Medium',
+            description: `GeeksforGeeks Problem: ${trimmedQuery}. This is a DSA problem from GeeksforGeeks practice section.`,
+            topicTags: [{ name: 'DSA' }, { name: 'GeeksforGeeks' }],
+            platform: "gfg",
+        };
     }
 
     return null;
@@ -289,15 +378,19 @@ export async function POST(request: NextRequest) {
 
         if (platform === "codeforces") {
             problem = await fetchCodeforcesProblem(query);
+        } else if (platform === "gfg") {
+            problem = await fetchGFGProblem(query);
         } else {
             problem = await fetchLeetCodeProblem(query);
         }
 
         if (!problem) {
-            const errorMsg = platform === "codeforces"
-                ? "Could not find the problem. Try format like '1900A' or '1900/A' or problem name"
-                : "Could not find the problem. Try using the exact problem name or number (e.g., 'two-sum' or '1')";
-            return NextResponse.json({ error: errorMsg }, { status: 404 });
+            const errorMessages: Record<string, string> = {
+                codeforces: "Could not find the problem. Try format like '1900A' or '1900/A' or problem name",
+                gfg: "Could not find the problem. Try the exact problem name (e.g., 'reverse-a-linked-list')",
+                leetcode: "Could not find the problem. Try using the exact problem name or number (e.g., 'two-sum' or '1')"
+            };
+            return NextResponse.json({ error: errorMessages[platform] || errorMessages.leetcode }, { status: 404 });
         }
 
         const cleanDescription = stripHtml(problem.description);
@@ -306,7 +399,12 @@ export async function POST(request: NextRequest) {
         // Generate hints using Gemini
         const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
-        const platformName = platform === "codeforces" ? "Codeforces" : "LeetCode";
+        const platformNames: Record<string, string> = {
+            codeforces: "Codeforces",
+            gfg: "GeeksforGeeks",
+            leetcode: "LeetCode"
+        };
+        const platformName = platformNames[platform] || "LeetCode";
         const prompt = `You are a DSA mentor helping a student solve a ${platformName} problem. Generate exactly 5 progressive hints that guide them toward the solution WITHOUT revealing the actual code or complete algorithm.
 
 Problem: ${problem.title}

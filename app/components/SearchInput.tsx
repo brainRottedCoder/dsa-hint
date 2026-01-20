@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Search, Loader2 } from "lucide-react";
 
-type Platform = "leetcode" | "codeforces";
+type Platform = "leetcode" | "codeforces" | "gfg";
 
 interface SearchInputProps {
     onSearch: (query: string, platform: Platform) => void;
@@ -21,30 +21,32 @@ export default function SearchInput({ onSearch, isLoading }: SearchInputProps) {
         }
     };
 
-    const placeholders = {
+    const placeholders: Record<Platform, string> = {
         leetcode: "Enter problem number or name (e.g., '1' or 'two-sum')",
         codeforces: "Enter problem ID (e.g., '1900A' or '1900/A')",
+        gfg: "Enter problem name (e.g., 'reverse-a-linked-list')",
     };
+
+    const platforms: { id: Platform; icon: string; label: string }[] = [
+        { id: "leetcode", icon: "📗", label: "LeetCode" },
+        { id: "codeforces", icon: "🔵", label: "Codeforces" },
+        { id: "gfg", icon: "🟢", label: "GFG" },
+    ];
 
     return (
         <form onSubmit={handleSubmit} className="search-container">
             <div className="platform-toggle">
-                <button
-                    type="button"
-                    className={`platform-btn ${platform === "leetcode" ? "active" : ""}`}
-                    onClick={() => setPlatform("leetcode")}
-                >
-                    <span className="platform-icon">📗</span>
-                    LeetCode
-                </button>
-                <button
-                    type="button"
-                    className={`platform-btn ${platform === "codeforces" ? "active" : ""}`}
-                    onClick={() => setPlatform("codeforces")}
-                >
-                    <span className="platform-icon">🔵</span>
-                    Codeforces
-                </button>
+                {platforms.map((p) => (
+                    <button
+                        key={p.id}
+                        type="button"
+                        className={`platform-btn ${platform === p.id ? "active" : ""}`}
+                        onClick={() => setPlatform(p.id)}
+                    >
+                        <span className="platform-icon">{p.icon}</span>
+                        {p.label}
+                    </button>
+                ))}
             </div>
 
             <div className="search-input-wrapper">

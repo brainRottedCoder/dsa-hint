@@ -6,7 +6,7 @@ import SearchInput from "./components/SearchInput";
 import HintStepper from "./components/HintStepper";
 import HistorySidebar from "./components/HistorySidebar";
 
-type Platform = "leetcode" | "codeforces";
+type Platform = "leetcode" | "codeforces" | "gfg";
 
 interface Hint {
   step: number;
