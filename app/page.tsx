@@ -6,6 +6,8 @@ import SearchInput from "./components/SearchInput";
 import HintStepper from "./components/HintStepper";
 import HistorySidebar from "./components/HistorySidebar";
 
+type Platform = "leetcode" | "codeforces";
+
 interface Hint {
   step: number;
   title: string;
@@ -16,6 +18,7 @@ interface Problem {
   title: string;
   difficulty: string;
   tags: string[];
+  platform?: Platform;
 }
 
 interface HistoryItem {
@@ -26,6 +29,7 @@ interface HistoryItem {
   currentStep: number;
   hints: Hint[];
   problem: Problem;
+  platform?: Platform;
 }
 
 const STORAGE_KEY = "dsa-hinter-history";
@@ -73,7 +77,7 @@ export default function Home() {
     }
   }, [currentStep, currentProblemId, hints.length]);
 
-  const handleSearch = async (query: string) => {
+  const handleSearch = async (query: string, platform: Platform = "leetcode") => {
     setIsLoading(true);
     setError(null);
 
@@ -81,7 +85,7 @@ export default function Home() {
       const response = await fetch("/api/hints", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query }),
+        body: JSON.stringify({ query, platform }),
       });
 
       const data = await response.json();
@@ -106,6 +110,7 @@ export default function Home() {
         currentStep: 0,
         hints: data.hints,
         problem: data.problem,
+        platform: data.problem.platform,
       };
 
       // Add to history (keep last 20)
