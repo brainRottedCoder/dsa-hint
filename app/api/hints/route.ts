@@ -345,6 +345,22 @@ async function fetchLeetCodeProblem(query: string): Promise<ProblemData | null> 
         console.error("Error in fallback fetch:", error);
     }
 
+    // Final fallback: Use the query directly for Gemini (when APIs are unavailable)
+    // This allows the app to work even when LeetCode APIs are down
+    if (trimmedQuery.length > 2) {
+        const formattedTitle = isNumber
+            ? `LeetCode Problem #${trimmedQuery}`
+            : trimmedQuery.split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+
+        return {
+            title: formattedTitle,
+            difficulty: 'Medium',
+            description: `LeetCode Problem: ${formattedTitle}. This is a coding problem from LeetCode's practice section.`,
+            topicTags: [{ name: 'LeetCode' }, { name: 'DSA' }],
+            platform: "leetcode",
+        };
+    }
+
     return null;
 }
 
